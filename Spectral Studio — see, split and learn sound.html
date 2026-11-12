@@ -86,6 +86,8 @@ details[open]>summary::before{transform:rotate(90deg)}
 .layer .l2{display:grid;grid-template-columns:auto 1fr auto;gap:3px 6px;align-items:center;font-size:12px;color:var(--muted)}
 .layer .l2 input[type=range]{width:100%}
 .layer .l3{display:flex;gap:4px;flex-wrap:wrap}
+.badge{font:600 10.5px Inter;letter-spacing:.04em;padding:2px 7px;border-radius:10px;white-space:nowrap}
+.badge.filter{background:#1f3330;color:#5ad1c8}.badge.rec{background:#33281a;color:#ff9f43}
 .layer .notes{font-size:11.5px;color:var(--muted);line-height:1.4}
 .status{font-size:12px;color:var(--muted)}
 .status.warn{color:var(--accent)}
@@ -207,6 +209,7 @@ table.freq th{color:var(--muted);font-weight:600}
         <button class="btn small" id="selZoom" title="Zoom the view to the selection">⤢ Zoom</button>
         <button class="btn small" id="selLayer" title="Copy the selection into a new layer">→ Layer</button>
         <button class="btn small" id="selNotes" title="Make one layer per detected note (fundamental + harmonics)">→ Layer per note</button>
+        <button class="btn small" id="selRecreate" title="Draw new synthetic tones + noise that imitate the selection (a Recreate layer)">→ Recreate</button>
         <button class="btn small" id="selClear" title="Esc">✕ Clear selection</button>
         <span class="sep"></span>
         <label class="muted" title="Playback speed">Speed <input type="range" id="speed" min="0.1" max="2" step="0.05" value="1" style="width:90px"></label><span class="mono" id="speedV" style="min-width:42px">1.00×</span>
@@ -254,15 +257,16 @@ table.freq th{color:var(--muted);font-weight:600}
         <summary>Layers</summary>
         <div class="pbody">
           <div class="row" style="gap:6px;flex-wrap:wrap">
-            <button class="btn small" id="addLayerBtn" title="An empty layer to paint on">+ Empty layer</button>
-            <button class="btn small" id="addSynthBtn" title="A layer that creates new sound from what you draw">+ Draw-to-sound layer</button>
+            <button class="btn small" id="addLayerBtn" title="Empty FILTER layer: wherever you paint, it plays the song's real sound">+ Filter layer</button>
+            <button class="btn small" id="addSynthBtn" title="Empty RECREATE layer: sharp lines you draw become sine tones">+ Recreate: tones</button>
+            <button class="btn small" id="addNoiseBtn" title="Empty RECREATE layer: what you draw becomes noise (hiss) with that shape">+ Recreate: noise</button>
             <button class="btn small" id="gotoExtract" title="Create a layer from a frequency band of the song">+ From band…</button>
           </div>
           <div id="layerList" style="display:flex;flex-direction:column;gap:6px"></div>
           <div class="row"><label title="How strongly layer colours cover the base spectrogram">Colour strength</label><input type="range" id="ovOp" min="0.1" max="1" step="0.01" value="0.8"><span class="val mono" id="ovOpV">0.80</span></div>
           <div class="row"><label title="FFT size used to cut layers out and turn them back into sound. Independent of the display. Bigger = cleaner separation of notes, smeared drum hits.">Edit FFT</label><select id="editN"><option>128</option><option>256</option><option>512</option><option>1024</option><option selected>2048</option><option>4096</option><option>8192</option><option>16384</option></select></div>
           <div class="status" id="renderStatus"></div>
-          <div class="hint"><b>👁</b> = show/hide in the spectrum view, <b>M</b> = mute, <b>S</b> = solo. These are independent, so you can mute the Base but still see it, then paint a new layer on top and hear only that.<br>The <b>Base</b> layer is the song. In <i>Remainder</i> mode it plays only what isn’t in another layer, so Base + layers = the original song. In <i>Full song</i> mode it always plays everything.<br>A <i>Filter</i> layer keeps the song’s real sound where you painted. A <i>Draw-to-sound</i> layer turns your strokes into new tones (sharp lines) or noise (blurry washes). Click a colour swatch to change it.</div>
+          <div class="hint"><b>👁</b> = show/hide in the spectrum view, <b>M</b> = mute, <b>S</b> = solo. These are independent, so you can mute the Base but still see it, then paint a new layer on top and hear only that.<br>The <b>Base</b> layer is the song. In <i>Remainder</i> mode it plays only what isn’t in another layer, so Base + layers = the original song. In <i>Full song</i> mode it always plays everything.<br>Every layer has a fixed type. A <b>FILTER</b> layer plays the song’s real sound wherever it is painted. A <b>RECREATE</b> layer makes new sound from what is drawn in it: <i>tones</i> layers turn thin lines into sine waves, and <i>noise</i> layers turn shapes into hiss. Use <b>＋ New layer → Recreate</b> or <b>→ Recreate</b> on a selection to have them drawn automatically from the song. Click a colour swatch to change it.</div>
         </div>
       </details>
       <details>
@@ -278,7 +282,18 @@ table.freq th{color:var(--muted);font-weight:600}
       </div>
       <div class="sidepane" id="sp-extract">
       <div class="pbody" style="padding-top:12px">
-        <div class="hint">Copy a frequency band of the song (or of another layer) into a <b>new coloured layer</b>. Drag the amber <b>LOW CUT</b> / <b>HIGH CUT</b> handles on the left axis of the spectrogram, or use the sliders.</div>
+        <div class="segbtn" id="exType" style="width:100%">
+          <button data-t="filter" class="active" style="flex:1" title="Cuts the band out of the song: you hear the real recording">Filter layer</button>
+          <button data-t="recreate" style="flex:1" title="Analyses the band and draws new synthetic tones + noise that imitate it">Recreate layer</button>
+        </div>
+        <div class="hint" id="exTypeHint"></div>
+        <div id="exRecOpts" style="display:none;flex-direction:column;gap:6px">
+          <label class="chk"><input type="checkbox" id="exRecTones" checked> Tones: one thin line (sine) per spectral peak</label>
+          <label class="chk"><input type="checkbox" id="exRecNoise" checked> Noise: a blurry wash for everything that is not a clear tone</label>
+          <div class="row"><label title="How many sine tones may be drawn at each moment. Fewer = simpler, more 'synthetic' sound.">Max tones</label><input type="range" id="exRecMax" min="2" max="120" step="1" value="40"><span class="val mono" id="exRecMaxV">40</span></div>
+          <div class="row"><label title="Ignore peaks quieter than this, relative to the loudest one">Detail</label><input type="range" id="exRecRange" min="30" max="90" step="5" value="60"><span class="val mono" id="exRecRangeV">60 dB</span></div>
+        </div>
+        <div class="hint">Drag the amber <b>LOW CUT</b> / <b>HIGH CUT</b> handles on the left axis of the spectrogram, or use the sliders.</div>
         <div class="row"><label>Source</label><select id="exSrc" style="flex:1"></select></div>
         <div class="row"><label class="chk" style="width:92px"><input type="checkbox" id="exHpOn" checked> Low cut</label><input type="range" id="exHp" min="0" max="1000"><span class="val mono" id="exHpV"></span></div>
         <div class="row"><label class="chk" style="width:92px"><input type="checkbox" id="exLpOn" checked> High cut</label><input type="range" id="exLp" min="0" max="1000"><span class="val mono" id="exLpV"></span></div>
@@ -289,7 +304,7 @@ table.freq th{color:var(--muted);font-weight:600}
         <div class="row"><label>Name</label><input type="text" id="exName" value="Bass" style="flex:1;min-width:0"></div>
         <div class="row"><label>Colour</label><input type="color" id="exColor" value="#ff9f43" style="width:34px;height:24px;border:0;background:none;padding:0"><div id="exSwatches" style="display:flex;gap:4px;flex-wrap:wrap"></div></div>
         <label class="chk" id="exMoveRow" style="display:none"><input type="checkbox" id="exMove" checked> Move it out of the source layer</label>
-        <div class="row" style="gap:6px"><button class="btn" id="exAudition" title="Play the original song through this filter in real time. Drag the handles while listening.">🎧 Audition</button><button class="btn primary" id="exCreate" style="flex:1;justify-content:center">Create layer</button></div>
+        <div class="row" style="gap:6px"><button class="btn" id="exAudition" title="Play the original song through this filter in real time. Drag the handles while listening.">🎧 Audition</button><button class="btn primary" id="exCreate" style="flex:1;justify-content:center">Create filter layer</button></div>
         <div class="hint" style="margin-top:4px">Quick bands:</div>
         <div id="exPresets" style="display:flex;gap:4px;flex-wrap:wrap"></div>
         <div class="hint" id="exInfo"></div>
@@ -800,7 +815,7 @@ const S={
   tool:{name:'bsel',size:22,soft:0.5,strength:1,harmonics:1,fall:0.75,ruler:false},
   layers:[], rest:null, activeId:null, nextId:1,
   ovOpacity:0.8, showOv:true, undo:[], sideTab:'layers', audition:false, audNodes:null, hpm:null,
-  ext:{src:'unassigned',hpOn:true,hp:40,lpOn:true,lp:250,slope:2,content:'all',time:'all',name:'Bass',color:'#ff9f43',move:true},
+  ext:{type:'filter',recTones:true,recNoise:true,recMax:40,recRange:60,src:'unassigned',hpOn:true,hp:40,lpOn:true,lp:250,slope:2,content:'all',time:'all',name:'Bass',color:'#ff9f43',move:true},
   src:'layers', playing:false, pos:0, startCtx:0, startPos:0, sources:[], nodes:{},
   hover:null, drag:null, needsDraw:true,
 };
@@ -857,10 +872,10 @@ async function analyze(keepLayers=true){
   // masks: remap if same range, else reset
   const sameRange=S.analyzedRange===rangeKey;
   if(keepLayers&&old&&sameRange){
-    for(const l of oldLayers){ l.mask=remapMask(l.mask,old,st); l.audio=null; l.dirty=true; }
+    for(const l of oldLayers){ l.mask=remapMask(l.mask,old,st); if(l.frac&&old.N!==st.N) l.frac=null; else if(l.frac) l.frac=new Int8Array(remapMask(new Uint8Array(l.frac.buffer),old,st).buffer); l.audio=null; l.dirty=true; }
   } else if(old){
     if(oldLayers.length) toast('New range: layer masks were cleared (they belonged to the old time range).');
-    for(const l of oldLayers){ l.mask=new Uint8Array(st.frames*st.bins); l.audio=null; l.dirty=true; }
+    for(const l of oldLayers){ l.mask=new Uint8Array(st.frames*st.bins); l.frac=null; l.audio=null; l.dirty=true; }
   }
   S.analyzedRange=rangeKey;
   if(!S.rest) S.rest={id:'rest',name:'Base (song)',isRest:true,visible:true,baseMode:'rest',mute:false,solo:false,gainDb:0,pan:0,pitch:0,mode:'rest',audio:null,dirty:true,color:'#7d8494',rgb:[125,132,148]};
@@ -891,7 +906,7 @@ function changeEditN(N){
   if(!S.st){ S.editN=N; return; }
   if(N<2*S.st.hop){ N=2*S.st.hop; ensureOption($('#editN'),N); $('#editN').value=N; toast('Edit FFT must be at least 2× the time step.'); }
   S.editN=N; const old=S.st, nst={...old,N,bins:N/2+1};
-  for(const l of S.layers){ l.mask=remapMask(l.mask,old,nst); l.audio=null; l.dirty=true; }
+  for(const l of S.layers){ l.mask=remapMask(l.mask,old,nst); l.frac=null; l.audio=null; l.dirty=true; }
   S.st=nst; S.proc=null; if(S.rest){ S.rest.audio=null; S.rest.dirty=true; } S.undo=[];
   rebuildRows(); rebuildOverlay(); updateRenderStatus();
 }
@@ -1070,8 +1085,9 @@ function rebuildOverlay(t0=0,t1){
           if(v){
             if(cd&&!n){ n=(D[oD+r]+tl[r]-dd.dbMin)/span; n=n<0?0:n>1?1:n; if(gm!==1)n=Math.pow(n,gm); n=Math.max(n,1e-6); }
             // brightness follows the song's spectrum, so you see the structure in the layer's colour
-            const br=l.mode==='synth'?1:0.2+0.8*n;
-            const a=v/255*(baseVis?op*(l.id===S.activeId?1:0.85):1);
+            let br=l.mode==='synth'?1:0.2+0.8*n, q=v/255;
+            if(l.ampLog){ const ex=l.synthTone==='noise'?5:2.5; q=Math.pow(q,ex*0.6); br=0.25+0.75*Math.pow(v/255,ex); }   // log-encoded levels: fade quiet parts
+            const a=q*(baseVis?op*(l.id===S.activeId?1:0.85):1);
             sr+=l.rgb[0]*br*a; sg+=l.rgb[1]*br*a; sb+=l.rgb[2]*br*a; sa+=a; keep*=(1-a); } }
         if(sa>0){ const p=((H-1-r)*W+(t-t0))*4; d[p]=sr/sa; d[p+1]=sg/sa; d[p+2]=sb/sa; d[p+3]=(1-keep)*255; }
       }
@@ -1123,8 +1139,8 @@ function renderLayerList(){
         <button class="ib mute ${l.mute?'on':''}" data-act="mute" title="Mute">M</button>
         <button class="ib solo ${l.solo?'on':''}" data-act="solo" title="Solo">S</button>
       </div>
-      <div class="l1"><select data-k="mode" style="flex:1"><option value="mask" ${l.mode==='mask'?'selected':''}>Filter: keeps the song where painted</option><option value="synth" ${l.mode==='synth'?'selected':''}>Draw-to-sound: makes new sound</option></select>
-        ${l.mode==='synth'?`<select data-k="synthTone"><option value="tonal" ${l.synthTone==='tonal'?'selected':''}>tones</option><option value="noise" ${l.synthTone==='noise'?'selected':''}>noise</option></select>`:''}</div>
+      <div class="l1">${l.mode==='mask'?'<span class="badge filter">FILTER</span><span class="muted" style="font-size:11.5px">plays the real song where painted</span>'
+        :`<span class="badge rec">RECREATE · ${l.synthTone==='noise'?'NOISE':'TONES'}</span><span class="muted" style="font-size:11.5px">${l.synthTone==='noise'?'drawn shapes become hiss':'drawn lines become sine tones'}</span>`}</div>
       ${mixControls(l)}
       <div class="l3"><button class="btn small" data-act="listen" title="Solo this layer and play">▶ Solo-listen</button><button class="btn small" data-act="clear">Clear</button><button class="btn small" data-act="invert" title="Everything not painted becomes painted">Invert</button><button class="btn small" data-act="del">Delete</button>${i<9?`<span class="muted" style="margin-left:auto;font-size:11px">key ${i+1}</span>`:''}</div>
       ${l.notes?`<div class="notes">${l.notes}</div>`:''}
@@ -1213,15 +1229,19 @@ async function renderLayers(showProg=true){
   if(showProg) prog.hide();
   updateRenderStatus();
 }
-/* draw-to-sound: strokes → sinusoids (tonal) or noise */
+/* Recreate layers: strokes → sinusoids (tones) or shaped noise.
+   Mask values are amplitudes: linear for hand-drawn layers, log (80 dB range) for analysed "Recreate" layers.
+   Tones are written as the exact STFT main lobe of a sine at the stroke's (sub-bin) frequency, so pitch and level are accurate. */
+const hannLobe=d=>{ const ad=Math.abs(d); if(ad>=2)return 0; if(ad<1e-6)return 1; if(Math.abs(ad-1)<1e-6)return 0.5; return Math.sin(Math.PI*d)/(Math.PI*d*(1-d*d)); };
 function synthSpectrum(l,st,yr,yi){
-  const {frames,bins,N,hop,ref}=st, amp=ref*Math.pow(10,l.synthDb/20), m=l.mask;
+  const {frames,bins,N,hop,ref}=st, m=l.mask, fr=l.frac||null, R=80;
+  const ampOf=v=>l.ampLog?Math.pow(10,(l.synthDb+(v/255-1)*R)/20):Math.pow(10,l.synthDb/20)*v/255;
   yr.fill(0); yi.fill(0);
   if(l.synthTone==='noise'){
-    for(let i=0;i<frames*bins;i++){ if(m[i]){ const a=amp*m[i]/255*0.5, ph=Math.random()*TAU; yr[i]=a*Math.cos(ph); yi[i]=a*Math.sin(ph); } }
+    const cal=Math.sqrt(N/hop)*(l.ampLog?1:0.35);    // random-phase frames add up incoherently: compensate for the overlap
+    for(let i=0;i<frames*bins;i++){ if(m[i]){ const a=ref*ampOf(m[i])*cal, ph=Math.random()*TAU; yr[i]=a*Math.cos(ph); yi[i]=a*Math.sin(ph); } }
     return;
   }
-  // tonal: each run of painted bins (max 4 wide) becomes one sinusoid at its centroid; phase tracked frame to frame
   let prev=[];
   for(let t=0;t<frames;t++){
     const o=t*bins, runs=[];
@@ -1229,18 +1249,58 @@ function synthSpectrum(l,st,yr,yi){
     while(k<bins){
       if(!m[o+k]){ k++; continue; }
       let e=k; while(e+1<bins&&m[o+e+1]&&e-k<3) e++;
-      let ws=0,cs=0; for(let j=k;j<=e;j++){ ws+=m[o+j]; cs+=m[o+j]*j; }
-      runs.push({k0:k,k1:e,c:cs/ws,ph:0}); k=e+1;
+      let ws=0,cs=0,mx=0; for(let j=k;j<=e;j++){ const v=m[o+j]; ws+=v; cs+=v*(j+(fr?fr[o+j]/254:0)); if(v>mx)mx=v; }
+      runs.push({c:cs/ws,mx,ph:0}); k=e+1;
     }
     const used=new Set();
     for(const r of runs){
       let best=null,bd=4; for(const p of prev){ const d=Math.abs(p.c-r.c); if(d<bd&&!used.has(p)){ bd=d; best=p; } }
       if(best){ used.add(best); r.ph=best.ph+TAU*((best.c+r.c)/2)*hop/N; } else r.ph=Math.random()*TAU;
-      for(let j=r.k0;j<=r.k1;j++){ const a=amp*m[o+j]/255, ph=r.ph+Math.PI*j; yr[o+j]=a*Math.cos(ph); yi[o+j]=a*Math.sin(ph); }
+      const a=ref*ampOf(r.mx), kA=Math.max(0,Math.ceil(r.c-2)), kB=Math.min(bins-1,Math.floor(r.c+2));
+      for(let j=kA;j<=kB;j++){ const L=hannLobe(j-r.c); if(!L)continue; const ph=r.ph+Math.PI*j; yr[o+j]+=a*L*Math.cos(ph); yi[o+j]+=a*L*Math.sin(ph); }
     }
     prev=runs;
   }
 }
+/* Build Recreate layers from a weight mask (which part of the song to imitate):
+   spectral peaks → thin tone lines (with exact sub-bin frequency), the rest → a smoothed noise envelope. */
+async function makeRecreate(w,name,color,opts={}){
+  const st=await ensureProc(), {frames,bins,re,im,ref}=st;
+  const tones=opts.tones!==false, noise=opts.noise!==false, maxP=opts.max||40, range=opts.range||60, R=80;
+  prog.show('Recreating…','Finding the sine-wave peaks in every moment');
+  // loudest point of the region
+  let gmax=0; for(let i=0;i<frames*bins;i++){ if(w[i]){ const v=Math.hypot(re[i],im[i])*w[i]/255; if(v>gmax)gmax=v; } }
+  if(!gmax){ prog.hide(); toast('Nothing to recreate there.'); return []; }
+  const topDb=20*Math.log10(gmax/ref), floorLin=gmax*Math.pow(10,-range/20);
+  const T=tones?new Uint8Array(frames*bins):null, F=tones?new Int8Array(frames*bins):null, Z=noise?new Uint8Array(frames*bins):null;
+  const A=new Float32Array(bins), Rz=new Float32Array(bins), near=new Uint8Array(bins), enc=db=>clamp(Math.round(255*(1+(db-topDb)/R)),1,255);
+  for(let t=0;t<frames;t++){ const o=t*bins; let any=false;
+    for(let k=0;k<bins;k++){ const ww=w[o+k]; A[k]=ww?Math.hypot(re[o+k],im[o+k])*ww/255:0; if(ww) any=true; }
+    if(!any)continue;
+    near.fill(0); const pk=[];
+    for(let k=2;k<bins-2;k++){ const v=A[k]; if(v<floorLin||v<=A[k-1]||v<A[k+1]||v<=A[k-2]||v<A[k+2])continue;
+      // prominence: compare with the dips on both sides (not the average, which other harmonics would inflate)
+      let lm=v,rm=v; for(let j=1;j<=6;j++){ if(k-j>=0&&A[k-j]<lm) lm=A[k-j]; if(k+j<bins&&A[k+j]<rm) rm=A[k+j]; }
+      if(v<Math.max(lm,rm)*2)continue; pk.push(k); }
+    pk.sort((x,y)=>A[y]-A[x]); if(pk.length>maxP) pk.length=maxP;
+    for(const k of pk){
+      const a=20*Math.log10(A[k-1]+1e-12), b=20*Math.log10(A[k]+1e-12), c=20*Math.log10(A[k+1]+1e-12), d0=a-2*b+c, p=d0?clamp(0.5*(a-c)/d0,-0.5,0.5):0;
+      const pdb=b-0.25*(a-c)*p-20*Math.log10(ref);
+      if(T){ T[o+k]=enc(pdb); F[o+k]=Math.round(p*254); }
+      for(let j=-2;j<=2;j++) if(k+j>=0&&k+j<bins) near[k+j]=1; }
+    if(Z){ // residual = spectrum with the tone lobes replaced by their surroundings, then smoothed a little across frequency
+      for(let k=0;k<bins;k++){ if(!near[k]||!T){ Rz[k]=A[k]; continue; } let lo=k,hi=k; while(lo>0&&near[lo])lo--; while(hi<bins-1&&near[hi])hi++; Rz[k]=Math.min(A[lo],A[hi]); }
+      for(let k=0;k<bins;k++){ let s2=0,c=0; for(let j=-2;j<=2;j++){ const kk=k+j; if(kk>=0&&kk<bins){ s2+=Rz[kk]*Rz[kk]; c++; } } const v=Math.sqrt(s2/c);
+        if(v>floorLin*0.3&&w[o+k]) Z[o+k]=enc(20*Math.log10(v/ref)); } }
+    if((t&511)===511){ prog.set(t/frames); await tick(); }
+  }
+  prog.hide();
+  const made=[], col=color||nextColor();
+  if(T){ const l=newLayer(name+' · tones',{mode:'synth',mask:T,color:col,notes:'Recreated: every thin line is a sine wave at the measured frequency and level.'}); l.synthTone='tonal'; l.ampLog=true; l.frac=F; l.synthDb=Math.round(topDb); made.push(l); }
+  if(Z){ const c2=T?shade(col,-0.35):col; const l=newLayer(name+' · noise',{mode:'synth',mask:Z,color:c2,notes:'Recreated: random-phase noise shaped like everything that was not a clear tone.'}); l.synthTone='noise'; l.ampLog=true; l.synthDb=Math.round(topDb); made.push(l); }
+  return made;
+}
+function shade(hex,f){ const [r,g,b]=hexToRgb(hex), m=v=>clamp(Math.round(f<0?v*(1+f):v+(255-v)*f),0,255); return '#'+[m(r),m(g),m(b)].map(v=>v.toString(16).padStart(2,'0')).join(''); }
 
 /* =====================================================================
    Auto split (harmonic/percussive separation + bands)
@@ -1823,8 +1883,9 @@ function initAnalyzerControls(){
   $('#tRuler').addEventListener('change',e=>{ S.tool.ruler=e.target.checked; S.needsDraw=true; });
   $('#undoBtn').addEventListener('click',undo);
   // layers
-  $('#addLayerBtn').addEventListener('click',()=>{ if(!S.st)return toast('Load a song first'); newLayer(); renderLayerList(); rebuildOverlay(); });
-  $('#addSynthBtn').addEventListener('click',()=>{ if(!S.st)return toast('Load a song first'); const l=newLayer('Drawn sound '+S.nextId,{mode:'synth'}); l.synthTone='tonal'; renderLayerList(); rebuildOverlay(); toast('Draw lines on this layer and play “Layers mix”. Sharp lines become tones; set it to “noise” for washes.',5000); });
+  $('#addLayerBtn').addEventListener('click',()=>{ if(!S.st)return toast('Load a song first'); newLayer(); renderLayerList(); rebuildOverlay(); setTool('brush'); });
+  $('#addNoiseBtn').addEventListener('click',()=>{ if(!S.st)return toast('Load a song first'); const l=newLayer('Drawn noise '+S.nextId,{mode:'synth'}); l.synthTone='noise'; renderLayerList(); rebuildOverlay(); setTool('brush'); toast('Paint with a soft brush: the shapes you draw become hiss. Mute the Base to hear it alone.',5000); });
+  $('#addSynthBtn').addEventListener('click',()=>{ if(!S.st)return toast('Load a song first'); const l=newLayer('Drawn tones '+S.nextId,{mode:'synth'}); l.synthTone='tonal'; renderLayerList(); rebuildOverlay(); setTool('line'); toast('Draw thin lines: each becomes a sine tone (try Harmonics > 1). Mute the Base to hear it alone.',5000); });
   $('#autoSplitBtn').addEventListener('click',()=>{ if(!S.st)return toast('Load a song first'); $('#splitModal').classList.add('show'); });
   $('#splitCancel').addEventListener('click',()=>$('#splitModal').classList.remove('show'));
   $('#splitSharp').addEventListener('input',e=>$('#splitSharpV').textContent=(+e.target.value).toFixed(1));
@@ -1964,7 +2025,7 @@ function selectionChanged(autoplay){
 }
 function updateSelBar(){
   const s=S.sel, info=$('#selInfo'); $('#sliceCanvas').classList.toggle('ana',!!s);
-  ['selPlay','selZoom','selLayer','selNotes','selClear','toolClearSel','topClearSel'].forEach(id=>$('#'+id).disabled=!s);
+  ['selPlay','selZoom','selLayer','selNotes','selRecreate','selClear','toolClearSel','topClearSel'].forEach(id=>$('#'+id).disabled=!s);
   if(!s){ info.innerHTML='No selection: drag with <b>⇔</b> (T) or <b>⬚</b> (X).'; $('#selStart').value=''; $('#selEnd').value=''; return; }
   const off=S.seg.start; if(document.activeElement!==$('#selStart')) $('#selStart').value=(s.t0+off).toFixed(3); if(document.activeElement!==$('#selEnd')) $('#selEnd').value=(s.t1+off).toFixed(3);
   const ms=(s.t1-s.t0)*1000;
@@ -2101,6 +2162,13 @@ function initSelectionUI(){
   $('#keepPitch').addEventListener('change',e=>{ S.keepPitch=e.target.checked; if(S.playing){ if(S.engine==='B'&&S.B&&!(S.sel&&S.sel.f0!=null)&&!S.keepPitch){ restartPlayback(0); } else setSpeed(S.speed); } });
   $('#selLayer').addEventListener('click',()=>selToLayer(false));
   $('#selNotes').addEventListener('click',()=>selToLayer(true));
+  $('#selRecreate').addEventListener('click',async()=>{ const s2=S.sel, st=S.st; if(!s2||!st)return;
+    const {frames,bins}=st, binHz=st.sr/st.N, c0=clamp(Math.floor(timeToFrame(s2.t0)),0,frames-1), c1=clamp(Math.ceil(timeToFrame(s2.t1)),c0,frames-1);
+    const m=new Uint8Array(frames*bins), e2=1/24, sm=x=>x<=0?0:x>=1?1:x*x*(3-2*x), wk=new Float32Array(bins);
+    for(let k=0;k<bins;k++){ const f=Math.max(1,k*binHz); wk[k]=s2.f0==null?1:sm((Math.log2(f/s2.f0)+e2)/(2*e2))*sm((Math.log2(s2.f1/f)+e2)/(2*e2)); }
+    for(let t=c0;t<=c1;t++){ const o=t*bins; for(let k=0;k<bins;k++) if(wk[k]>0.004) m[o+k]=Math.round(wk[k]*255); }
+    const made=await makeRecreate(m,s2.f0!=null?'Recreated box':'Recreated part',null,{tones:S.ext.recTones,noise:S.ext.recNoise,max:S.ext.recMax,range:S.ext.recRange});
+    if(made.length){ renderLayerList(); rebuildOverlay(); toast('Recreate layers added. Mute the Base (M) and clear the selection to compare.',6000); } });
   updateSelBar();
 }
 function selToLayer(perNote){
@@ -2190,13 +2258,18 @@ function syncExUI(){
   if(document.activeElement!==$('#exName')) $('#exName').value=e.name;
   $('#exColor').value=e.color; $('#exMove').checked=e.move;
   $$('#exSwatches .sw').forEach(x=>x.style.outline=x.dataset.c===e.color?'2px solid #fff':'none');
+  const rec=e.type==='recreate'; $$('#exType button').forEach(b=>b.classList.toggle('active',b.dataset.t===e.type));
+  $('#exRecOpts').style.display=rec?'flex':'none'; $('#exCreate').textContent=rec?'Create recreate layer(s)':'Create filter layer';
+  $('#exTypeHint').innerHTML=rec?'<b>Recreate</b> analyses the band and <i>draws new sound</i>: a thin line (sine wave) for every peak, plus a blurry noise layer for the rest. You hear a synthetic imitation, which shows how much of a sound is clean tones and how much is noise.'
+    :'<b>Filter</b> cuts the band out of the song: you hear the <i>real recording</i>, just limited to this band.';
+  if(rec) $('#exMoveRow').style.display='none';
   drawExResp(); updateExInfo(); S.needsDraw=true;
 }
 function updateExInfo(){
   const e=S.ext, src={unassigned:'the part of the song not in any layer yet',base:'the whole song'}[e.src]||('layer “'+(layerById(e.src)?.name||'?')+'”'+(e.move?' (moving it out)':''));
   const band=e.hpOn&&e.lpOn?`${fmtHz(e.hp)} – ${fmtHz(e.lp)}`:e.hpOn?`above ${fmtHz(e.hp)}`:e.lpOn?`below ${fmtHz(e.lp)}`:'all frequencies';
   const cont={all:'',tonal:', steady tones only',hits:', hits only'}[e.content];
-  $('#exInfo').innerHTML=`Will create <b style="color:${e.color}">${e.name||'New layer'}</b>: ${band}${cont}, from ${src}, ${e.time==='view'?'visible time range only':'whole track'}.`;
+  $('#exInfo').innerHTML=`Will ${e.type==='recreate'?'recreate':'create'} <b style="color:${e.color}">${e.name||'New layer'}</b>: ${band}${cont}, from ${src}, ${e.time==='view'?'visible time range only':'whole track'}.`;
 }
 function drawExResp(){
   const c=$('#exResp'); if(!c||!c.offsetParent)return; const {g,w,h}=setupCanvas(c); g.clearRect(0,0,w,h);
@@ -2245,6 +2318,12 @@ async function extractLayer(){
       if(free) v*=Math.max(0,free[k]);
       if(srcL) v*=srcL.mask[o+k]/255;
       m[o+k]=Math.round(v*255); } }
+  if(e.type==='recreate'){
+    if(!e.recTones&&!e.recNoise) return toast('Tick Tones and/or Noise');
+    const made=await makeRecreate(m,e.name||'Band',e.color,{tones:e.recTones,noise:e.recNoise,max:e.recMax,range:e.recRange});
+    if(made.length){ e.color=nextColor(); renderLayerList(); rebuildOverlay(); syncExUI();
+      toast(`Recreated “${e.name}”: ${made.length} layer(s). Mute the Base (M) to hear only the recreation.`,6000); }
+    return; }
   if(srcL&&e.move){ pushUndoAll(srcL); const sm=srcL.mask; for(let i=0;i<sm.length;i++) if(m[i]) sm[i]=Math.max(0,sm[i]-m[i]); markLayerDirty(srcL); }
   const band=e.hpOn&&e.lpOn?`${fmtHz(e.hp)}–${fmtHz(e.lp)}`:e.hpOn?`> ${fmtHz(e.hp)}`:e.lpOn?`< ${fmtHz(e.lp)}`:'all';
   const l=newLayer(e.name||'Band',{color:e.color,mask:m,notes:`Extracted ${band}${e.content!=='all'?' ('+e.content+')':''}, ${{0:'brick-wall',1:'12',2:'24',4:'48',8:'96'}[e.slope]}${+e.slope?' dB/oct':''}.`});
@@ -2269,6 +2348,11 @@ function initExtractUI(){
   $('#exColor').addEventListener('input',ev=>{ S.ext.color=ev.target.value; syncExUI(); });
   $('#exMove').addEventListener('change',ev=>{ S.ext.move=ev.target.checked; updateExInfo(); });
   $('#exCreate').addEventListener('click',extractLayer);
+  $$('#exType button').forEach(b=>b.addEventListener('click',()=>{ S.ext.type=b.dataset.t; syncExUI(); }));
+  $('#exRecTones').addEventListener('change',ev=>{ S.ext.recTones=ev.target.checked; updateExInfo(); });
+  $('#exRecNoise').addEventListener('change',ev=>{ S.ext.recNoise=ev.target.checked; updateExInfo(); });
+  $('#exRecMax').addEventListener('input',ev=>{ S.ext.recMax=+ev.target.value; $('#exRecMaxV').textContent=ev.target.value; });
+  $('#exRecRange').addEventListener('input',ev=>{ S.ext.recRange=+ev.target.value; $('#exRecRangeV').textContent=ev.target.value+' dB'; });
   $('#exAudition').addEventListener('click',()=>{ if(!S.seg) return toast('Load a song first');
     const t=S.playing?curTime():S.pos;
     if(S.audition){ S.audition=false; updatePlayBtn(); if(S.playing){ S.playing=false; stopSources(); play(t); } toast('Audition off: Play uses the normal mix again.'); return; }
